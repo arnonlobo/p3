@@ -28,7 +28,7 @@ import {
 
 // --- CONFIGURAÇÃO DA API (NODE.JS + SQLITE) ---
 // Em produção na VPS, altere 'localhost' pelo IP/Domínio da sua API
-const API_URL = "http://localhost:3001/api/sessions";
+const API_URL = "/api/sessions";
 
 // --- FUNÇÃO PARA LER TEMPO DO TEXTO (ex: 3'30", 5', 30") ---
 const parseTimeToSeconds = (text) => {
