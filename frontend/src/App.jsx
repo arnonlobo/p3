@@ -147,7 +147,22 @@ export default function App() {
   const [dbStatus, setDbStatus] = useState("Conectando...");
 
   const [sessions, setSessions] = useState([]);
-  const [currentSessionId, setCurrentSessionId] = useState(null);
+  // Modifique a declaração inicial para buscar da memória (LocalStorage)
+  const [currentSessionId, setCurrentSessionId] = useState(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("p3_current_session_id") || null;
+    }
+    return null;
+  });
+
+  // Adicione este useEffect logo abaixo para salvar automaticamente sempre que mudar de tela
+  useEffect(() => {
+    if (currentSessionId) {
+      localStorage.setItem("p3_current_session_id", currentSessionId);
+    } else {
+      localStorage.removeItem("p3_current_session_id");
+    }
+  }, [currentSessionId]);
   const [isEditingMode, setIsEditingMode] = useState(false);
   const [now, setNow] = useState(new Date());
 
@@ -191,7 +206,7 @@ export default function App() {
           saveSessionToDB(defaultSess);
         }
         setDbStatus("SQLite Online");
-      } catch (err) {
+      } catch {
         console.warn("API Offline, usando modo de segurança LocalStorage");
         setDbStatus("Modo Offline (Local)");
         const saved = localStorage.getItem("p3_weekly_sessions");
@@ -222,8 +237,28 @@ export default function App() {
   }, [sessions]);
 
   useEffect(() => {
+    // Tick normal a cada segundo
     const interval = setInterval(() => setNow(new Date()), 1000);
-    return () => clearInterval(interval);
+
+    // Ao voltar para a aba (após fechar/minimizar/trocar de aba),
+    // força uma atualização imediata do relógio para o cronômetro não ficar parado
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        setNow(new Date());
+      }
+    };
+
+    // Ao ganhar foco na janela também atualiza
+    const handleFocus = () => setNow(new Date());
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("focus", handleFocus);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("focus", handleFocus);
+    };
   }, []);
 
   // === MÉTODOS DE ESCRITA NO DB (NODE/SQLITE) ===
@@ -235,7 +270,7 @@ export default function App() {
         body: JSON.stringify(serializeSession(session)),
       });
       setDbStatus("SQLite Online");
-    } catch (err) {
+    } catch {
       setDbStatus("Modo Offline (Local)");
     }
   };
@@ -244,7 +279,7 @@ export default function App() {
     try {
       await fetch(`${API_URL}/${sessionId}`, { method: "DELETE" });
       setDbStatus("SQLite Online");
-    } catch (err) {
+    } catch {
       setDbStatus("Modo Offline (Local)");
     }
   };
@@ -342,6 +377,8 @@ export default function App() {
             },
           ],
         };
+        setSessions((prev) => [...prev, newSess]);
+        setCurrentSessionId(newSess.id);
         saveSessionToDB(newSess);
       },
     );
@@ -361,19 +398,18 @@ export default function App() {
 
   // === AÇÕES DO GESTOR DE SESSÃO ===
   const updateActiveSession = (updater) => {
-    let updatedSess = null;
-    setSessions((prev) =>
-      prev.map((s) => {
+    setSessions((prev) => {
+      const next = prev.map((s) => {
         if (s.id === currentSessionId) {
-          updatedSess =
-            typeof updater === "function" ? updater(s) : { ...s, ...updater };
-          return updatedSess;
+          return typeof updater === "function" ? updater(s) : { ...s, ...updater };
         }
         return s;
-      }),
-    );
-    // Salva no banco de forma reativa
-    if (updatedSess) saveSessionToDB(updatedSess);
+      });
+      // Encontra a sessão atualizada dentro do updater para salvar no DB de forma correta
+      const updatedSess = next.find((s) => s.id === currentSessionId);
+      if (updatedSess) saveSessionToDB(updatedSess);
+      return next;
+    });
   };
 
   const handleStartTimeChange = (e) => {
@@ -870,7 +906,7 @@ export default function App() {
     try {
       document.execCommand("copy");
       openAlert("Sucesso", "✅ Relatório copiado com sucesso!");
-    } catch (err) {
+    } catch {
       openAlert(
         "Erro",
         "❌ Erro ao copiar relatório. O navegador pode ter bloqueado.",
@@ -1249,7 +1285,7 @@ export default function App() {
                     <input
                       type="number"
                       min="1"
-                      value={act.duration}
+                      value={act.duration} 
                       onChange={(e) =>
                         updateActivityField(
                           act.id,
@@ -1264,7 +1300,7 @@ export default function App() {
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
                   <div>
-                    <label className="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider flex items-center gap-1">
+                    <label className="flex items-center gap-1 text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider">
                       <MapPin className="w-3 h-3" /> Local (Opcional)
                     </label>
                     <input
@@ -1278,7 +1314,7 @@ export default function App() {
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider flex items-center gap-1">
+                    <label className="flex items-center gap-1 text-xs font-bold text-slate-500 mb-1 uppercase tracking-wider">
                       <User className="w-3 h-3" /> Responsável (Opcional)
                     </label>
                     <input
