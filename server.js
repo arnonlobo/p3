@@ -17,15 +17,27 @@ const db = new sqlite3.Database("./gestor.db", (err) => {
   } else {
     console.log("✅ Conectado ao banco de dados SQLite.");
 
-    // Cria a tabela de sessões caso não exista
+    // Cria a tabela de sessões ativas
     db.run(`CREATE TABLE IF NOT EXISTS sessions (
       id TEXT PRIMARY KEY,
       data TEXT
+    )`);
+
+    // Cria a tabela de histórico (arquivo morto)
+    db.run(`CREATE TABLE IF NOT EXISTS sessions_history (
+      id TEXT PRIMARY KEY,
+      data TEXT,
+      archived_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`);
   }
 });
 
 // --- ROTAS DA API ---
+
+// 0. TEMPO DO SERVIDOR: Para Sicronização de Relógios "Anti-Deslize"
+app.get("/api/time", (req, res) => {
+  res.json({ serverTime: Date.now() });
+});
 
 // 1. LER: Retorna todas as sessões guardadas
 app.get("/api/sessions", (req, res) => {
@@ -55,13 +67,38 @@ app.post("/api/sessions", (req, res) => {
   });
 });
 
-// 3. APAGAR: Remove uma sessão por completo
+// 3. APAGAR (ARQUIVAR): Move uma sessão para o arquivo em vez de destruir
 app.delete("/api/sessions/:id", (req, res) => {
   const id = req.params.id;
 
-  db.run("DELETE FROM sessions WHERE id = ?", id, function (err) {
+  // Primeiro busca a sessão na tabela principal
+  db.get("SELECT data FROM sessions WHERE id = ?", [id], (err, row) => {
     if (err) return res.status(500).json({ error: err.message });
-    res.json({ success: true, deleted: this.changes });
+    if (!row) return res.status(404).json({ error: "Sessão não encontrada" });
+
+    // Insere no arquivo de histórico
+    db.run("INSERT OR REPLACE INTO sessions_history (id, data) VALUES (?, ?)", [id, row.data], (err2) => {
+      if (err2) return res.status(500).json({ error: err2.message });
+
+      // Só apaga da principal depois de garantir que foi para o histórico
+      db.run("DELETE FROM sessions WHERE id = ?", id, function (err3) {
+        if (err3) return res.status(500).json({ error: err3.message });
+        res.json({ success: true, archived: true, deleted: this.changes });
+      });
+    });
+  });
+});
+
+// 4. LER HISTÓRICO: Retorna as sessões arquivadas
+app.get("/api/sessions/history", (req, res) => {
+  db.all("SELECT data, archived_at FROM sessions_history ORDER BY archived_at DESC", [], (err, rows) => {
+    if (err) return res.status(500).json({ error: err.message });
+    const history = rows.map((row) => {
+      const parsed = JSON.parse(row.data);
+      parsed.archivedAt = row.archived_at;
+      return parsed;
+    });
+    res.json(history);
   });
 });
 

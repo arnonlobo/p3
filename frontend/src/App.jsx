@@ -149,6 +149,10 @@ export default function App() {
   const [sessions, setSessions] = useState([]);
   const sessionsRef = useRef(sessions);
   useEffect(() => { sessionsRef.current = sessions; }, [sessions]);
+  
+  // States para Loading e Sincronização de Relógios (Anti-deslize)
+  const [isLoading, setIsLoading] = useState(true);
+  const [serverTimeOffset, setServerTimeOffset] = useState(0);
   // Modifique a declaração inicial para buscar da memória (LocalStorage)
   const [currentSessionId, setCurrentSessionId] = useState(() => {
     if (typeof window !== "undefined") {
@@ -211,6 +215,20 @@ export default function App() {
   // === BUSCA DE DADOS DO SERVIDOR ===
   const fetchSessionsFromServer = async (autoNavigate = false) => {
     try {
+      // 1. Sincroniza Relógio com o Servidor (Anti-deslize)
+      try {
+        const timeRes = await fetch(API_URL.replace("/sessions", "/time"));
+        if (timeRes.ok) {
+          const { serverTime } = await timeRes.json();
+          const offset = serverTime - Date.now();
+          setServerTimeOffset(offset);
+          setNow(new Date(Date.now() + offset));
+        }
+      } catch (err) {
+        console.warn("Falha na sincronização de tempo do servidor");
+      }
+
+      // 2. Busca sessões ativas
       const res = await fetch(API_URL);
       if (!res.ok) throw new Error("Servidor indisponível");
       const data = await res.json();
@@ -257,6 +275,10 @@ export default function App() {
           activities: defaultActivities,
         };
         setSessions([defaultSess]);
+      }
+    } finally {
+      if (autoNavigate) {
+        setIsLoading(false);
       }
     }
   };
@@ -316,11 +338,11 @@ export default function App() {
     });
   }, [sessions]);
 
-  // Timer: atualiza "now" a cada segundo para o cronômetro
+  // Timer: atualiza "now" a cada segundo para o cronômetro, com o offset do servidor (Anti-deslize)
   useEffect(() => {
-    const interval = setInterval(() => setNow(new Date()), 1000);
+    const interval = setInterval(() => setNow(new Date(Date.now() + serverTimeOffset)), 1000);
     return () => clearInterval(interval);
-  }, []);
+  }, [serverTimeOffset]);
 
   // === SISTEMA DE MODAIS CUSTOMIZADOS ===
   const openPrompt = (title, message, defaultValue, onConfirm) => {
@@ -1000,6 +1022,16 @@ export default function App() {
   };
 
   // === RENDERIZAÇÃO DO APP ===
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-200 font-sans flex flex-col items-center justify-center relative">
+        <CustomModal />
+        <div className="w-12 h-12 border-4 border-slate-800 border-t-emerald-500 rounded-full animate-spin mb-4"></div>
+        <p className="text-slate-400 font-mono animate-pulse">A carregar sessões e a sincronizar servidores...</p>
+      </div>
+    );
+  }
+
   if (!currentSessionId) {
     return (
       <div className="min-h-screen bg-slate-950 text-slate-200 font-sans pb-20">
