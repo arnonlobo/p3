@@ -278,18 +278,12 @@ export default function App() {
         setNow(new Date());
       }
     };
-    const handleFocus = () => {
-      fetchSessionsFromServer(false);
-      setNow(new Date());
-    };
 
     document.addEventListener("visibilitychange", handleVisibilityChange);
-    window.addEventListener("focus", handleFocus);
 
     return () => {
       clearInterval(pollInterval);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
-      window.removeEventListener("focus", handleFocus);
     };
   }, []);
 
@@ -423,7 +417,6 @@ export default function App() {
         };
         setSessions((prev) => [...prev, newSess]);
         setCurrentSessionId(newSess.id);
-        saveSessionToDB(newSess);
       },
     );
   };
@@ -1108,7 +1101,26 @@ export default function App() {
   }
 
   const activeSession = sessions.find((s) => s.id === currentSessionId);
-  if (!activeSession) return null;
+  // Failsafe: se houver sessionId mas a sessão não existir mais (deletada/race condition),
+  // renderiza a visão semanal para não quebrar com tela branca.
+  if (currentSessionId && !activeSession) {
+    // Retorna a view normal sem setar estado imediatamente no render (evitando warning react)
+    // O usuário apenas precisará clicar numa nova sessão ou painel.
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-200 font-sans pb-20 flex flex-col items-center justify-center">
+        <CustomModal />
+        <div className="text-center">
+          <h2 className="text-xl text-slate-400 mb-4">A sessão selecionada não está mais disponível.</h2>
+          <button 
+            onClick={() => setCurrentSessionId(null)}
+            className="px-6 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-lg text-white font-bold transition-colors"
+          >
+            Voltar ao Painel
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   const sessionStatus = activeSession.status;
   const plannedStartTime = activeSession.plannedStartTime;
