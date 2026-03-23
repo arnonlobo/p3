@@ -182,6 +182,30 @@ export default function App() {
     onConfirm: null,
   });
 
+  // === MÉTODOS DE ESCRITA NO DB (NODE/SQLITE) ===
+  // IMPORTANTE: declarados ANTES de fetchSessionsFromServer pois são usados por ela.
+  const saveSessionToDB = async (session) => {
+    try {
+      await fetch(API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(serializeSession(session)),
+      });
+      setDbStatus("SQLite Online");
+    } catch {
+      setDbStatus("Modo Offline (Local)");
+    }
+  };
+
+  const deleteSessionFromDB = async (sessionId) => {
+    try {
+      await fetch(`${API_URL}/${sessionId}`, { method: "DELETE" });
+      setDbStatus("SQLite Online");
+    } catch {
+      setDbStatus("Modo Offline (Local)");
+    }
+  };
+
   // === BUSCA DE DADOS DO SERVIDOR ===
   const fetchSessionsFromServer = async (autoNavigate = false) => {
     try {
@@ -279,29 +303,6 @@ export default function App() {
     const interval = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(interval);
   }, []);
-
-  // === MÉTODOS DE ESCRITA NO DB (NODE/SQLITE) ===
-  const saveSessionToDB = async (session) => {
-    try {
-      await fetch(API_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(serializeSession(session)),
-      });
-      setDbStatus("SQLite Online");
-    } catch {
-      setDbStatus("Modo Offline (Local)");
-    }
-  };
-
-  const deleteSessionFromDB = async (sessionId) => {
-    try {
-      await fetch(`${API_URL}/${sessionId}`, { method: "DELETE" });
-      setDbStatus("SQLite Online");
-    } catch {
-      setDbStatus("Modo Offline (Local)");
-    }
-  };
 
   // === SISTEMA DE MODAIS CUSTOMIZADOS ===
   const openPrompt = (title, message, defaultValue, onConfirm) => {
@@ -416,19 +417,18 @@ export default function App() {
   };
 
   // === AÇÕES DO GESTOR DE SESSÃO ===
+  // Calcula o novo estado diretamente a partir do estado atual (sessions),
+  // sem usar updater funcional no setSessions — evita side effects em funções puras.
   const updateActiveSession = (updater) => {
-    setSessions((prev) => {
-      const next = prev.map((s) => {
-        if (s.id === currentSessionId) {
-          return typeof updater === "function" ? updater(s) : { ...s, ...updater };
-        }
-        return s;
-      });
-      // Encontra a sessão atualizada dentro do updater para salvar no DB de forma correta
-      const updatedSess = next.find((s) => s.id === currentSessionId);
-      if (updatedSess) saveSessionToDB(updatedSess);
-      return next;
+    const next = sessions.map((s) => {
+      if (s.id === currentSessionId) {
+        return typeof updater === "function" ? updater(s) : { ...s, ...updater };
+      }
+      return s;
     });
+    setSessions(next);
+    const updatedSess = next.find((s) => s.id === currentSessionId);
+    if (updatedSess) saveSessionToDB(updatedSess);
   };
 
   const handleStartTimeChange = (e) => {
