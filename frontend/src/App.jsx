@@ -283,30 +283,10 @@ export default function App() {
     }
   };
 
-  // === BUSCA INICIAL + AUTO-NAVEGAÇÃO PARA SESSÃO EM CURSO ===
+  // === BUSCA INICIAL DE DADOS ===
   useEffect(() => {
-    // Na carga inicial, auto-navega para sessão em andamento (funciona entre dispositivos)
+    // Na carga inicial, auto-navega para sessão em andamento
     fetchSessionsFromServer(true);
-
-    // Polling a cada 30 segundos para manter sincronizado entre dispositivos
-    const pollInterval = setInterval(() => {
-      fetchSessionsFromServer(false);
-    }, 30000);
-
-    // Ao voltar para a aba/janela, busca dados frescos imediatamente
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === "visible") {
-        fetchSessionsFromServer(false);
-        setNow(new Date());
-      }
-    };
-
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-
-    return () => {
-      clearInterval(pollInterval);
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-    };
   }, []);
 
   // === GRAVAÇÃO AUTOMÁTICA: salva TODAS as sessões no DB e localStorage sempre que mudam ===
@@ -332,10 +312,13 @@ export default function App() {
     if (currentJson === lastSavedJsonRef.current) return;
     lastSavedJsonRef.current = currentJson;
 
-    // Salva cada sessão no banco de dados
-    sessions.forEach((session) => {
-      saveSessionToDB(session);
-    });
+    // Salva cada sessão no banco de dados SEQUENCIALMENTE para não bloquear o SQLite
+    const syncAllToDB = async () => {
+      for (const session of sessions) {
+        await saveSessionToDB(session);
+      }
+    };
+    syncAllToDB();
   }, [sessions]);
 
   // Timer: atualiza "now" a cada segundo para o cronômetro, com o offset do servidor (Anti-deslize)
