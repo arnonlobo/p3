@@ -182,51 +182,89 @@ export default function App() {
     onConfirm: null,
   });
 
-  // === BUSCA INICIAL DE DADOS (NODE API ou LOCALSTORAGE) ===
-  useEffect(() => {
-    const fetchSessions = async () => {
-      try {
-        const res = await fetch(API_URL);
-        if (!res.ok) throw new Error("Servidor indisponível");
-        const data = await res.json();
+  // === BUSCA DE DADOS DO SERVIDOR ===
+  const fetchSessionsFromServer = async (autoNavigate = false) => {
+    try {
+      const res = await fetch(API_URL);
+      if (!res.ok) throw new Error("Servidor indisponível");
+      const data = await res.json();
 
-        if (data.length > 0) {
-          setSessions(data.map(deserializeSession));
-        } else {
-          const defaultSess = {
-            id: `session-default-${Date.now()}`,
-            day: "Segunda",
-            title: "Instrução Principal (Exemplo)",
-            status: "planning",
-            plannedStartTime: getDefaultTime(),
-            targetEndTime: null,
-            activities: defaultActivities,
-          };
-          setSessions([defaultSess]);
-          saveSessionToDB(defaultSess);
+      if (data.length > 0) {
+        const parsed = data.map(deserializeSession);
+        setSessions(parsed);
+
+        // Auto-navega para a sessão em andamento (útil ao abrir em outro dispositivo)
+        if (autoNavigate) {
+          const runningSess = parsed.find((s) => s.status === "running");
+          if (runningSess) {
+            setCurrentSessionId(runningSess.id);
+          }
         }
-        setDbStatus("SQLite Online");
-      } catch {
-        console.warn("API Offline, usando modo de segurança LocalStorage");
-        setDbStatus("Modo Offline (Local)");
-        const saved = localStorage.getItem("p3_weekly_sessions");
-        if (saved) {
-          setSessions(JSON.parse(saved).map(deserializeSession));
-        } else {
-          const defaultSess = {
-            id: `session-default-${Date.now()}`,
-            day: "Segunda",
-            title: "Instrução Principal (Exemplo)",
-            status: "planning",
-            plannedStartTime: getDefaultTime(),
-            targetEndTime: null,
-            activities: defaultActivities,
-          };
-          setSessions([defaultSess]);
-        }
+      } else {
+        const defaultSess = {
+          id: `session-default-${Date.now()}`,
+          day: "Segunda",
+          title: "Instrução Principal (Exemplo)",
+          status: "planning",
+          plannedStartTime: getDefaultTime(),
+          targetEndTime: null,
+          activities: defaultActivities,
+        };
+        setSessions([defaultSess]);
+        saveSessionToDB(defaultSess);
+      }
+      setDbStatus("SQLite Online");
+    } catch {
+      console.warn("API Offline, usando modo de segurança LocalStorage");
+      setDbStatus("Modo Offline (Local)");
+      const saved = localStorage.getItem("p3_weekly_sessions");
+      if (saved) {
+        setSessions(JSON.parse(saved).map(deserializeSession));
+      } else {
+        const defaultSess = {
+          id: `session-default-${Date.now()}`,
+          day: "Segunda",
+          title: "Instrução Principal (Exemplo)",
+          status: "planning",
+          plannedStartTime: getDefaultTime(),
+          targetEndTime: null,
+          activities: defaultActivities,
+        };
+        setSessions([defaultSess]);
+      }
+    }
+  };
+
+  // === BUSCA INICIAL + AUTO-NAVEGAÇÃO PARA SESSÃO EM CURSO ===
+  useEffect(() => {
+    // Na carga inicial, auto-navega para sessão em andamento (funciona entre dispositivos)
+    fetchSessionsFromServer(true);
+
+    // Polling a cada 30 segundos para manter sincronizado entre dispositivos
+    const pollInterval = setInterval(() => {
+      fetchSessionsFromServer(false);
+    }, 30000);
+
+    // Ao voltar para a aba/janela, busca dados frescos imediatamente
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        fetchSessionsFromServer(false);
+        setNow(new Date());
       }
     };
-    fetchSessions();
+    const handleFocus = () => {
+      fetchSessionsFromServer(false);
+      setNow(new Date());
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("focus", handleFocus);
+
+    return () => {
+      clearInterval(pollInterval);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("focus", handleFocus);
+    };
   }, []);
 
   // Gravação local contínua para backup/modo offline
@@ -237,28 +275,9 @@ export default function App() {
   }, [sessions]);
 
   useEffect(() => {
-    // Tick normal a cada segundo
+    // Tick normal a cada segundo para atualizar o cronômetro
     const interval = setInterval(() => setNow(new Date()), 1000);
-
-    // Ao voltar para a aba (após fechar/minimizar/trocar de aba),
-    // força uma atualização imediata do relógio para o cronômetro não ficar parado
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === "visible") {
-        setNow(new Date());
-      }
-    };
-
-    // Ao ganhar foco na janela também atualiza
-    const handleFocus = () => setNow(new Date());
-
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-    window.addEventListener("focus", handleFocus);
-
-    return () => {
-      clearInterval(interval);
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-      window.removeEventListener("focus", handleFocus);
-    };
+    return () => clearInterval(interval);
   }, []);
 
   // === MÉTODOS DE ESCRITA NO DB (NODE/SQLITE) ===
