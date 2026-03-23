@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   Play,
   CheckSquare,
@@ -147,6 +147,8 @@ export default function App() {
   const [dbStatus, setDbStatus] = useState("Conectando...");
 
   const [sessions, setSessions] = useState([]);
+  const sessionsRef = useRef(sessions);
+  useEffect(() => { sessionsRef.current = sessions; }, [sessions]);
   // Modifique a declaração inicial para buscar da memória (LocalStorage)
   const [currentSessionId, setCurrentSessionId] = useState(() => {
     if (typeof window !== "undefined") {
@@ -291,15 +293,37 @@ export default function App() {
     };
   }, []);
 
-  // Gravação local contínua para backup/modo offline
-  useEffect(() => {
-    if (sessions.length > 0) {
-      localStorage.setItem("p3_weekly_sessions", JSON.stringify(sessions));
-    }
-  }, [sessions]);
+  // === GRAVAÇÃO AUTOMÁTICA: salva TODAS as sessões no DB e localStorage sempre que mudam ===
+  // Esta é a ÚNICA forma de garantir que TODA mudança é persistida, incluindo startSession.
+  const isInitialLoadRef = useRef(true);
+  const lastSavedJsonRef = useRef("");
 
   useEffect(() => {
-    // Tick normal a cada segundo para atualizar o cronômetro
+    if (sessions.length === 0) return;
+
+    // Salva no localStorage (backup offline)
+    localStorage.setItem("p3_weekly_sessions", JSON.stringify(sessions));
+
+    // Não salva no DB na primeira carga (os dados vieram DE LÁ)
+    if (isInitialLoadRef.current) {
+      isInitialLoadRef.current = false;
+      lastSavedJsonRef.current = JSON.stringify(sessions);
+      return;
+    }
+
+    // Só salva se os dados realmente mudaram (evita loops com o polling)
+    const currentJson = JSON.stringify(sessions);
+    if (currentJson === lastSavedJsonRef.current) return;
+    lastSavedJsonRef.current = currentJson;
+
+    // Salva cada sessão no banco de dados
+    sessions.forEach((session) => {
+      saveSessionToDB(session);
+    });
+  }, [sessions]);
+
+  // Timer: atualiza "now" a cada segundo para o cronômetro
+  useEffect(() => {
     const interval = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(interval);
   }, []);
@@ -417,18 +441,17 @@ export default function App() {
   };
 
   // === AÇÕES DO GESTOR DE SESSÃO ===
-  // Calcula o novo estado diretamente a partir do estado atual (sessions),
-  // sem usar updater funcional no setSessions — evita side effects em funções puras.
+  // Função pura: só atualiza o estado React.
+  // O save no DB é feito automaticamente pelo useEffect que observa [sessions].
   const updateActiveSession = (updater) => {
-    const next = sessions.map((s) => {
-      if (s.id === currentSessionId) {
-        return typeof updater === "function" ? updater(s) : { ...s, ...updater };
-      }
-      return s;
-    });
-    setSessions(next);
-    const updatedSess = next.find((s) => s.id === currentSessionId);
-    if (updatedSess) saveSessionToDB(updatedSess);
+    setSessions((prev) =>
+      prev.map((s) => {
+        if (s.id === currentSessionId) {
+          return typeof updater === "function" ? updater(s) : { ...s, ...updater };
+        }
+        return s;
+      })
+    );
   };
 
   const handleStartTimeChange = (e) => {
