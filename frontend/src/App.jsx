@@ -289,36 +289,10 @@ export default function App() {
     fetchSessionsFromServer(true);
   }, []);
 
-  // === GRAVAÇÃO AUTOMÁTICA: salva TODAS as sessões no DB e localStorage sempre que mudam ===
-  // Esta é a ÚNICA forma de garantir que TODA mudança é persistida, incluindo startSession.
-  const isInitialLoadRef = useRef(true);
-  const lastSavedJsonRef = useRef("");
-
   useEffect(() => {
-    if (sessions.length === 0) return;
-
-    // Salva no localStorage (backup offline)
-    localStorage.setItem("p3_weekly_sessions", JSON.stringify(sessions));
-
-    // Não salva no DB na primeira carga (os dados vieram DE LÁ)
-    if (isInitialLoadRef.current) {
-      isInitialLoadRef.current = false;
-      lastSavedJsonRef.current = JSON.stringify(sessions);
-      return;
+    if (sessions.length > 0) {
+      localStorage.setItem("p3_weekly_sessions", JSON.stringify(sessions));
     }
-
-    // Só salva se os dados realmente mudaram (evita loops com o polling)
-    const currentJson = JSON.stringify(sessions);
-    if (currentJson === lastSavedJsonRef.current) return;
-    lastSavedJsonRef.current = currentJson;
-
-    // Salva cada sessão no banco de dados SEQUENCIALMENTE para não bloquear o SQLite
-    const syncAllToDB = async () => {
-      for (const session of sessions) {
-        await saveSessionToDB(session);
-      }
-    };
-    syncAllToDB();
   }, [sessions]);
 
   // Timer: atualiza "now" a cada segundo para o cronômetro, com o offset do servidor (Anti-deslize)
@@ -422,6 +396,7 @@ export default function App() {
         };
         setSessions((prev) => [...prev, newSess]);
         setCurrentSessionId(newSess.id);
+        saveSessionToDB(newSess);
       },
     );
   };
@@ -433,6 +408,7 @@ export default function App() {
       "Apagar esta sessão por completo e permanentemente?",
       () => {
         deleteSessionFromDB(id);
+        setSessions((prev) => prev.filter((s) => s.id !== id));
         if (currentSessionId === id) setCurrentSessionId(null);
       },
     );
@@ -441,15 +417,23 @@ export default function App() {
   // === AÇÕES DO GESTOR DE SESSÃO ===
   // Função pura: só atualiza o estado React.
   // O save no DB é feito automaticamente pelo useEffect que observa [sessions].
+  // Grava automaticamente a sessão alterada no BD em tempo real.
   const updateActiveSession = (updater) => {
-    setSessions((prev) =>
-      prev.map((s) => {
+    setSessions((prev) => {
+      let updatedSession = null;
+      const next = prev.map((s) => {
         if (s.id === currentSessionId) {
-          return typeof updater === "function" ? updater(s) : { ...s, ...updater };
+          updatedSession = typeof updater === "function" ? updater(s) : { ...s, ...updater };
+          return updatedSession;
         }
         return s;
-      })
-    );
+      });
+      // Fire-and-forget: salva apenas ESTA sessão que sofreu alteração no banco
+      if (updatedSession) {
+        saveSessionToDB(updatedSession);
+      }
+      return next;
+    });
   };
 
   const handleStartTimeChange = (e) => {
